@@ -1,0 +1,17 @@
+services:
+  transcriber:
+    build: .
+    # keep container alive so Inspector can docker‑exec into it
+    command: ["tail", "-f", "/dev/null"]
+    stdin_open: true   # <‑ keeps STDIN open
+    tty: true          # <‑ Docker allocates a pseudo‑TTY
+    environment:
+      AWS_REGION: ${AWS_REGION}
+      TRANSCRIBE_BUCKET: ${TRANSCRIBE_BUCKET}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    volumes:
+      - ~/.aws:/root/.aws:ro        # optional fallback creds
+    ports:
+      - "6274:6274"
+      - "6277:6277"
