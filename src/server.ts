@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import * as fs from "fs/promises";
 import { z } from "zod";
 import { FfmpegExtractor } from "./services/audio.js";
 import { YtDlpDownloader } from "./services/downloader.js";
@@ -32,15 +33,23 @@ server.tool(
         languageCode: z.string().optional().default("en-US"),
     },
     async (args: StartArgsT) => {
+        let videoPath: string | undefined = undefined;
+        let audioPath: string | undefined = undefined;
         try {
-            const video =
-                args.source === "local"
-                    ? args.location
-                    : await dl.fetch({ source: args.source, url: args.location });
+            log.info({ args }, "Received start_transcription request");
+            videoPath = args.source === "local"
+                ? args.location
+                : await dl.fetch({ source: args.source, url: args.location });
+            log.info({ videoPath }, "Video file ready");
 
-            const audio = await aud.extract(video);
-            const s3Uri = await s3.upload(audio);
+            audioPath = await aud.extract(videoPath);
+            log.info({ audioPath }, "Audio file extracted");
+
+            const s3Uri = await s3.upload(audioPath);
+            log.info({ s3Uri }, "Audio file uploaded to S3");
+
             const jobId = await stt.startJob(s3Uri, args.languageCode);
+            log.info({ jobId }, "Transcription job started");
 
             return {
                 content: [
@@ -51,7 +60,7 @@ server.tool(
                 ],
             };
         } catch (error) {
-            log.error("Error in start_transcription:", error);
+            log.error({ err: error }, "Error in start_transcription");
             return {
                 content: [
                     {
@@ -61,6 +70,25 @@ server.tool(
                 ],
                 isError: true,
             };
+        } finally {
+            // Cleanup temporary files
+            if (audioPath) {
+                try {
+                    await fs.unlink(audioPath);
+                    log.info({ audioPath }, "✅ Cleaned up temporary audio file");
+                } catch (unlinkErr) {
+                    log.warn({ err: unlinkErr, file: audioPath }, "⚠️ Failed to clean up temporary audio file");
+                }
+            }
+            // Only delete video if it wasn't a local source
+            if (videoPath && args.source !== 'local') {
+                try {
+                    await fs.unlink(videoPath);
+                    log.info({ videoPath }, "✅ Cleaned up temporary video file");
+                } catch (unlinkErr) {
+                    log.warn({ err: unlinkErr, file: videoPath }, "⚠️ Failed to clean up temporary video file");
+                }
+            }
         }
     }
 );
